@@ -12,12 +12,21 @@ npm run lint
 npm run build
 ```
 
-Copy `.env.example` to `.env.local` and set:
+Copy `.env.example` to `.env.local` for local overrides. No secrets are required.
 
 | Variable | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_SITE_URL` | Canonical URL used for metadata, sitemap and Open Graph. |
-| `LEAD_WEBHOOK_URL` | Where site-assessment and contact submissions are POSTed as JSON. **If unset, leads are only logged on the server — nothing is delivered.** |
+| `NEXT_PUBLIC_SITE_URL` | Canonical URL used for metadata, sitemap and Open Graph. Inlined at build time. |
+| `LEADS_TABLE_NAME` | DynamoDB table that stores leads (system of record). **Required in production** - without it the API refuses leads rather than dropping them. |
+| `LEAD_NOTIFICATIONS_TOPIC_ARN` | SNS topic that notifies sales after a lead is stored. A failed notification never loses the lead. |
+
+## Lead pipeline
+
+`POST /api/leads` validates the submission (plus a honeypot), writes it to DynamoDB, and only then returns the reference to the visitor. The SNS notification is sent after the response; its outcome is recorded on the item as `notificationStatus` (`pending` / `published` / `failed`). Logs contain only the reference, lead type and status - never the customer's details.
+
+## Deployment
+
+Production runs on AWS (ECS Fargate, ARM64) behind an Application Load Balancer and Cloudflare. See [`infra/README.md`](infra/README.md). Pushes to `main` deploy through GitHub Actions (`.github/workflows/deploy.yml`).
 
 ## Structure
 
@@ -35,7 +44,7 @@ src/
   data/                 all repeated content (solutions, equipment, services,
                         management capabilities, navigation, image registry)
   lib/
-    leads/              shared validation schema + delivery (webhook)
+    leads/              shared validation schema + storage/notification
     metadata.ts         per-page SEO helper
 ```
 

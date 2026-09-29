@@ -1,0 +1,16 @@
+.git
+.github
+.next
+node_modules
+infra
+Dockerfile
+.dockerignore
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+
+# Environment files never go into the image.
+.env*
+
+# Retired EV Grid Charging logo (kept locally, never shipped).
+public/brand/ev-grid-charging-logo.png.png

@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  EV Grid Energy TLS certificate for the production ALB. DNS validated; the
+  validation CNAMEs are added manually in Cloudflare (DNS only). Kept in its
+  own stack because creation waits until those records exist.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: evgridenergy.com
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames: [!Sub "www.${DomainName}"]
+      ValidationMethod: DNS
+      KeyAlgorithm: RSA_2048
+
+Outputs:
+  CertificateArn:
+    Value: !Ref Certificate

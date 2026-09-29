@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { deliverLead } from "@/lib/leads/deliver";
+import { after, NextResponse } from "next/server";
+import { logLeadEvent, notifyLead, saveLead } from "@/lib/leads/deliver";
 import { validateLead } from "@/lib/leads/schema";
 
 export async function POST(request: Request) {
@@ -22,14 +22,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, errors: result.errors }, { status: 422 });
   }
 
+  // The lead is only acknowledged once it has been stored.
+  let record;
   try {
-    const record = await deliverLead(result.data);
-    return NextResponse.json({ ok: true, reference: record.reference });
+    record = await saveLead(result.data);
   } catch (error) {
-    console.error("[leads] Delivery failed", error);
+    logLeadEvent("lead.store_failed", {
+      type: result.data.type,
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
     return NextResponse.json(
       { ok: false, message: "We couldn't submit your request right now. Please try again shortly." },
       { status: 502 },
     );
   }
+
+  // Notification runs after the response; its failure never loses the stored lead.
+  after(() => notifyLead(record));
+
+  return NextResponse.json({ ok: true, reference: record.reference });
 }

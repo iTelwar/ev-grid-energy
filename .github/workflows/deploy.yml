@@ -1,0 +1,111 @@
+name: Deploy production
+
+# main -> verify -> build ARM64 image -> smoke test -> push to ECR -> roll ECS service.
+# AWS access is through GitHub OIDC (role ev-grid-energy-github-deploy, which
+# trusts only this repository's main branch). No long-lived AWS keys.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('verify-{0}', github.ref) || 'production' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: ev-grid-energy-web
+  ECS_CLUSTER: ev-grid-energy-prod
+  ECS_SERVICE: ev-grid-energy-web
+  TASK_FAMILY: ev-grid-energy-web
+  CONTAINER: web
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test --if-present
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SITE_URL: https://evgridenergy.com
+      - name: No retired brand or domain in build output
+        run: |
+          if grep -rIilE "EV Grid Charging|EVGRID CHARGING|evgridcharging\.com" .next/server .next/static; then
+            echo "::error::Retired brand/domain found in build output"; exit 1
+          fi
+
+  deploy:
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image (linux/arm64)
+        run: docker build --platform linux/arm64 -t app:${{ github.sha }} .
+
+      - name: Smoke test image
+        run: |
+          docker run -d --name smoke -p 3000:3000 app:${{ github.sha }}
+          for i in $(seq 1 30); do curl -fsS http://localhost:3000/api/health && break; sleep 1; done
+          curl -fsS -o /dev/null http://localhost:3000/
+          curl -fsS -o /dev/null http://localhost:3000/sitemap.xml
+          # next/image (sharp) must work on this architecture
+          curl -fsS -o /dev/null -w '%{content_type}\n' "http://localhost:3000/_next/image?url=%2Fbrand%2Fev-grid-energy-logo.png&w=256&q=75" | grep -q '^image/'
+          # Without LEADS_TABLE_NAME the production build must refuse leads, not drop them
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/leads -H 'content-type: application/json' \
+            --data '{"type":"contact","name":"CI","email":"ci@example.com","topic":"General inquiry","message":"smoke"}')
+          [ "$code" = 502 ] || { echo "::error::expected 502 from unconfigured lead store, got $code"; exit 1; }
+          docker logs smoke 2>&1 | tail -20
+          docker rm -f smoke
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image
+        id: push
+        run: |
+          image="${{ steps.ecr.outputs.registry }}/$ECR_REPOSITORY:${{ github.sha }}"
+          docker tag app:${{ github.sha }} "$image"
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Register task definition with the new image
+        id: taskdef
+        run: |
+          current=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$current" --query taskDefinition > current.json
+          jq --arg img "${{ steps.push.outputs.image }}" --arg c "$CONTAINER" '
+            (.containerDefinitions[] | select(.name == $c) | .image) = $img
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' current.json > next.json
+          arn=$(aws ecs register-task-definition --cli-input-json file://next.json --query taskDefinition.taskDefinitionArn --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy and wait for stability
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "${{ steps.taskdef.outputs.arn }}" --query 'service.deployments[0].id' --output text
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].{taskDefinition:taskDefinition,running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}'

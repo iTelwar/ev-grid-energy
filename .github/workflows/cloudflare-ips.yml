@@ -1,0 +1,25 @@
+name: Sync Cloudflare origin allowlist
+
+# Keeps the ev-grid-energy-cloudflare-ipv4 prefix list (ALB ingress) equal to
+# https://api.cloudflare.com/client/v4/ips. Fails without changes if the
+# Cloudflare response looks wrong.
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-2
+      - run: infra/sync-cloudflare-ips.sh

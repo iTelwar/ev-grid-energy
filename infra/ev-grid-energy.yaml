@@ -23,9 +23,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Temporary /32 allowed to reach the ALB directly during pre-launch verification. Leave empty in normal operation.
-  GitHubRepository:
+  GitHubOidcSubjectPrefix:
     Type: String
-    Default: iTelwar/ev-grid-energy
+    Default: repo:iTelwar@207638470/ev-grid-energy@1395966030
+    Description: >-
+      OIDC "sub" prefix for iTelwar/ev-grid-energy. The repository uses GitHub's
+      immutable subject format (owner@id/repo@id), which cannot be matched by a
+      renamed or re-created repository. See
+      gh api repos/iTelwar/ev-grid-energy/actions/oidc/customization/sub
   CanonicalHost:
     Type: String
     Default: evgridenergy.com
@@ -364,7 +369,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub ${GitHubOidcSubjectPrefix}:ref:refs/heads/main
       Policies:
         - PolicyName: ev-grid-energy-github-deploy
           PolicyDocument:

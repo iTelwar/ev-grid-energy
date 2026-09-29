@@ -35,7 +35,10 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   images: {
-    formats: ["image/avif", "image/webp"],
+    // WebP only: AVIF encoding took 8-40s per image on the 0.25 vCPU task
+    // (WebP ~1s), and optimized images are cached per task, so every deploy
+    // would re-pay that cost on first views.
+    formats: ["image/webp"],
     qualities: [75, 85],
   },
   async headers() {

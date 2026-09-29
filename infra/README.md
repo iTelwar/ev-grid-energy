@@ -31,14 +31,18 @@ It needs the repository secret `AWS_DEPLOY_ROLE_ARN` (the stack output
 Infrastructure changes:
 
 ```bash
-AWS_PROFILE=<admin profile> infra/deploy.sh                    # keeps current image and parameters' defaults
+AWS_PROFILE=<admin profile> infra/deploy.sh                    # no-op / re-sync; keeps current image and parameters
 AWS_PROFILE=<admin profile> infra/deploy.sh DesiredCount=1 CertificateArn=arn:aws:acm:...
 ```
 
-Always pass the parameters currently in use (`DesiredCount`, `CertificateArn`);
-CloudFormation otherwise falls back to the template defaults. `deploy.sh`
-fills in `ImageTag` from the running service so an infrastructure update never
-rolls the application back.
+Parameters you do not pass keep their current values (`aws cloudformation
+deploy` reuses them), so only pass what you are changing. `deploy.sh` fills in
+`ImageTag` from the running service so an infrastructure update never rolls
+the application back. `VerificationCidr` is only for temporary pre-launch
+checks; clear it with `VerificationCidr=""`.
+
+`LeadNotificationEmail` subscribes a mailbox to the lead topic. AWS emails a
+confirmation link that must be confirmed before notifications are delivered.
 
 ## Cloudflare origin allowlist
 

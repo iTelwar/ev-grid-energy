@@ -34,10 +34,15 @@ Parameters:
   CanonicalHost:
     Type: String
     Default: evgridenergy.com
+  LeadNotificationEmail:
+    Type: String
+    Default: ""
+    Description: Mailbox subscribed to ev-grid-energy-lead-notifications (must exist first; the subscription must be confirmed).
 
 Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, ""]]
   HasVerificationCidr: !Not [!Equals [!Ref VerificationCidr, ""]]
+  HasLeadNotificationEmail: !Not [!Equals [!Ref LeadNotificationEmail, ""]]
 
 Resources:
   # ---------------------------------------------------------------- network
@@ -236,6 +241,14 @@ Resources:
             Action: sns:Publish
             Resource: !Ref LeadNotificationsTopic
             Condition: { Bool: { aws:SecureTransport: "false" } }
+
+  LeadNotificationEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasLeadNotificationEmail
+    Properties:
+      TopicArn: !Ref LeadNotificationsTopic
+      Protocol: email
+      Endpoint: !Ref LeadNotificationEmail
 
   # Unencrypted on purpose: CloudWatch alarms and Budgets cannot publish to a
   # topic encrypted with the AWS managed SNS key. Carries no customer data.
